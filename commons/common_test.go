@@ -128,3 +128,90 @@ func TestQueryParams_Str(t *testing.T) {
 		})
 	}
 }
+
+func TestQueryParamsFromRawQueryStr(t *testing.T) {
+	tests := []struct {
+		name     string
+		rawQuery string
+		expected QueryParams
+		wantErr  bool
+	}{
+		{
+			name:     "empty string",
+			rawQuery: "",
+			expected: QueryParams{},
+			wantErr:  false,
+		},
+		{
+			name:     "single param",
+			rawQuery: "key1=value1",
+			expected: QueryParams{
+				&QueryParam{Name: "key1", Value: "value1"},
+			},
+			wantErr: false,
+		},
+		{
+			name:     "multiple params unsorted",
+			rawQuery: "key2=value2&key1=value1",
+			expected: QueryParams{ // Expected unsorted output
+				&QueryParam{Name: "key2", Value: "value2"},
+				&QueryParam{Name: "key1", Value: "value1"},
+			},
+			wantErr: false,
+		},
+		{
+			name:     "params needing decoding",
+			rawQuery: "k%20ey=v%26l%3Due",
+			expected: QueryParams{
+				&QueryParam{Name: "k ey", Value: "v&l=ue"},
+			},
+			wantErr: false,
+		},
+		{
+			name:     "duplicate key",
+			rawQuery: "key1=value1&key1=value2",
+			expected: QueryParams{
+				&QueryParam{Name: "key1", Value: "value1"},
+				&QueryParam{Name: "key1", Value: "value2"},
+			},
+			wantErr: false,
+		},
+		{
+			name:     "empty value",
+			rawQuery: "key1=",
+			expected: QueryParams{
+				&QueryParam{Name: "key1", Value: ""},
+			},
+			wantErr: false,
+		},
+		{
+			name:     "key only",
+			rawQuery: "key1",
+			expected: QueryParams{},
+			wantErr:  true,
+		},
+		{
+			name:     "mixed",
+			rawQuery: "b=2&a=1&c=",
+			expected: QueryParams{
+				&QueryParam{Name: "b", Value: "2"},
+				&QueryParam{Name: "a", Value: "1"},
+				&QueryParam{Name: "c", Value: ""},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := QueryParamsFromRawQueryStr(tt.rawQuery)
+
+			if tt.wantErr {
+				require.Error(t, err, "QueryParamsFromRawQueryStr() did not return an expected error")
+			} else {
+				require.NoError(t, err, "QueryParamsFromRawQueryStr() returned an unexpected error")
+				assert.Equal(t, tt.expected, result, "QueryParamsFromRawQueryStr() returned incorrect params")
+			}
+		})
+	}
+}
