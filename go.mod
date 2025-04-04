@@ -3,6 +3,12 @@ module github.com/charleshuang3/camouflagetorrentclients
 go 1.24.1
 
 require (
+	github.com/anacrolix/log v0.15.3-0.20240627045001-cd912c641d83
+	github.com/anacrolix/torrent v1.58.1
+	github.com/stretchr/testify v1.10.0
+)
+
+require (
 	github.com/RoaringBitmap/roaring v1.2.3 // indirect
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
@@ -11,7 +17,6 @@ require (
 	github.com/anacrolix/envpprof v1.3.0 // indirect
 	github.com/anacrolix/generics v0.0.3-0.20240902042256-7fb2702ef0ca // indirect
 	github.com/anacrolix/go-libutp v1.3.2 // indirect
-	github.com/anacrolix/log v0.15.3-0.20240627045001-cd912c641d83 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.4 // indirect
@@ -19,7 +24,6 @@ require (
 	github.com/anacrolix/multiless v0.4.0 // indirect
 	github.com/anacrolix/stm v0.4.0 // indirect
 	github.com/anacrolix/sync v0.5.1 // indirect
-	github.com/anacrolix/torrent v1.58.1 // indirect
 	github.com/anacrolix/upnp v0.1.4 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -67,7 +71,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/tidwall/btree v1.6.0 // indirect
 	github.com/wlynxg/anet v0.0.3 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
