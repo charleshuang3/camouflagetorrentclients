@@ -90,6 +90,7 @@ func (s *requestDirector) modifyQuery(r *http.Request) error {
 	} else if event == commons.EventStopped {
 		s.torrents.Delete(infoHash)
 	}
+	// Announce not following a started event is possible, when seeding a finished torrent.
 
 	pt := got.(*perTorrent)
 
