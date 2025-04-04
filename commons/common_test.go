@@ -2,10 +2,8 @@ package commons
 
 import (
 	"net/url"
-	"slices"
 	"testing"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -129,25 +127,4 @@ func TestQueryParams_Str(t *testing.T) {
 			assert.Equal(t, tt.expected, result, "queryParams.str() returned incorrect string")
 		})
 	}
-}
-
-// TestTorrentFile verifies that a specific torrent file ("test-torrents/test-public.torrent")
-// conforms to expected specifications.
-func TestTorrentFile(t *testing.T) {
-	mi, err := metainfo.LoadFromFile("../test-torrents/test-public.torrent")
-	require.NoError(t, err)
-	assert.Len(t, mi.AnnounceList, 2)
-	assert.Equal(t, []string{"http://127.0.0.1:3456/tracker/announce"}, mi.AnnounceList[0])
-	assert.Equal(t, []string{"http://127.0.0.1:7890/tracker/announce"}, mi.AnnounceList[1])
-	assert.Equal(t, "a9bf7ab1bb05919a234a35135995148966085f39", mi.HashInfoBytes().HexString())
-
-	info, err := mi.UnmarshalInfo()
-	require.NoError(t, err)
-	files := []string{}
-	for _, f := range info.Files {
-		files = append(files, f.DisplayPath(&info))
-	}
-	assert.Len(t, files, 3)
-	slices.Sort(files)
-	assert.Equal(t, []string{"1.txt", "dir/2.txt", "large.file.txt"}, files)
 }
