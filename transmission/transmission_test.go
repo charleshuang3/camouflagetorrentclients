@@ -2,6 +2,7 @@ package transmission
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -69,10 +70,8 @@ func TestAnnounceRequest(t *testing.T) {
 				assert.Equal(t, "close", r.Header.Get("Connection"))
 
 				// Query parameter checks:
-				beginIndex := 0
-				if tc.hasAuthQuery {
-					beginIndex = 1
-				}
+				infoHash, err := url.QueryUnescape(tc.infoHash)
+				require.NoError(t, err)
 
 				q, err := commons.QueryParamsFromRawQueryStr(r.URL.RawQuery)
 				require.NoError(t, err)
@@ -82,11 +81,13 @@ func TestAnnounceRequest(t *testing.T) {
 					assert.Len(t, q, 11)
 				}
 
-				infoHash, err := url.QueryUnescape(tc.infoHash)
-				require.NoError(t, err)
-
 				if tc.hasAuthQuery {
 					assert.Equal(t, q[0], &commons.QueryParam{Name: "auth", Value: "123"})
+				}
+
+				beginIndex := 0
+				if tc.hasAuthQuery {
+					beginIndex = 1
 				}
 
 				assert.Equal(t, q[beginIndex+0], &commons.QueryParam{Name: "info_hash", Value: infoHash})
@@ -185,4 +186,225 @@ func TestCreatePerTorrent(t *testing.T) {
 		previousPeerIDs[pt.peerID] = true
 		previousKeys[pt.key] = true
 	}
+}
+
+func TestHttpRequestDirector_Scrape(t *testing.T) {
+	rd := New()
+	req, err := http.NewRequest("GET", "http://example.com/tracker/scrape?info_hash=123&unrelated_args=456", nil)
+	req.Header.Set("User-Agent", "Teapot/1.0")
+	require.NoError(t, err)
+
+	// Store original values for comparison
+	originalURL := req.URL.String()
+	originalHeader := req.Header.Clone()
+
+	err = rd.HttpRequestDirector(req)
+	require.NoError(t, err)
+
+	// Assert that the request was not modified
+	assert.Equal(t, originalURL, req.URL.String(), "URL should not be modified for scrape requests")
+	assert.Equal(t, originalHeader, req.Header, "Headers should not be modified for scrape requests")
+}
+
+// TestHttpRequestDirector_Announce tests the modification of headers and query parameters
+// for announce requests, including parameter ordering and handling of private tracker auth keys.
+func TestHttpRequestDirector_Announce(t *testing.T) {
+	infoHash := "%A9%BFz%B1%BB%05%91%9A%23J5%13Y%95%14%89f%08_9"
+	infoHashUnescaped, _ := url.QueryUnescape(infoHash)
+
+	testCases := []struct {
+		name               string
+		rawQuery           string
+		hasAuth            bool
+		expectedParamCount int
+	}{
+		{
+			name: "Public Torrent",
+			rawQuery: fmt.Sprintf(
+				"compact=1&downloaded=0&event=started&info_hash=%s&key=OLD_KEY&left=7159086&peer_id=OLD_PEER_ID&port=3456&supportcrypto=1&uploaded=0",
+				infoHash),
+			hasAuth:            false,
+			expectedParamCount: 11, // Standard 11 params
+		},
+		{
+			name: "Private Torrent",
+			rawQuery: fmt.Sprintf(
+				"auth=123&compact=1&downloaded=0&event=started&info_hash=%s&key=OLD_KEY&left=7159086&peer_id=OLD_PEER_ID&port=3456&supportcrypto=1&uploaded=0",
+				infoHash),
+			hasAuth:            true,
+			expectedParamCount: 12, // Standard 11 params + auth
+		},
+	}
+
+	// Expected order based on queryDefs in transmission.go (excluding auth)
+	baseExpectedOrder := []string{
+		"info_hash", "peer_id", "port", "uploaded", "downloaded",
+		"left", "numwant", "key", "compact", "supportcrypto", "event",
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			rd := New()
+			dummyURL := "http://example.com/tracker/announce?" + tc.rawQuery
+
+			req, err := http.NewRequest("GET", dummyURL, nil)
+			require.NoError(t, err)
+			// Add some initial headers to ensure they are overwritten/removed
+			req.Header.Set("User-Agent", "OldAgent/1.0")
+			req.Header.Set("X-Custom-Header", "ShouldBeRemoved")
+
+			err = rd.HttpRequestDirector(req)
+			require.NoError(t, err)
+
+			// --- Header Assertions (same for all cases) ---
+			assert.Equal(t, "Transmission/4.0.6", req.Header.Get("User-Agent"), "User-Agent header mismatch")
+			assert.Equal(t, "deflate, gzip, br, zstd", req.Header.Get("Accept-Encoding"), "Accept-Encoding header mismatch")
+			assert.Equal(t, "*/*", req.Header.Get("Accept"), "Accept header mismatch")
+			assert.Empty(t, req.Header.Get("X-Custom-Header"), "Custom header should have been removed")
+			assert.Len(t, req.Header, 3, "Incorrect number of headers") // User-Agent, Accept-Encoding, Accept
+
+			// --- Query Parameter Assertions ---
+			q, err := commons.QueryParamsFromRawQueryStr(req.URL.RawQuery)
+			require.NoError(t, err)
+			require.Len(t, q, tc.expectedParamCount, "Incorrect number of query parameters")
+
+			expectedOrder := baseExpectedOrder
+			offset := 0
+			if tc.hasAuth {
+				// Check auth param first
+				assert.Equal(t, "auth", q[0].Name, "First param should be auth for private")
+				assert.Equal(t, "123", q[0].Value, "Auth param value mismatch")
+				offset = 1 // Shift index for checking the rest
+			}
+
+			// Check order and values for the rest
+			for i, expectedName := range expectedOrder {
+				actualParam := q[i+offset]
+				assert.Equal(t, expectedName, actualParam.Name, "Parameter name mismatch at index %d", i)
+
+				switch expectedName {
+				case "info_hash":
+					assert.Equal(t, infoHashUnescaped, actualParam.Value, "info_hash value mismatch")
+				case "peer_id":
+					assert.Len(t, actualParam.Value, 20, "peer_id length mismatch")
+					assert.True(t, strings.HasPrefix(actualParam.Value, transmissionV406Bep20), "peer_id prefix mismatch")
+				case "port":
+					assert.Equal(t, "3456", actualParam.Value, "port value mismatch")
+				case "uploaded":
+					assert.Equal(t, "0", actualParam.Value, "uploaded value mismatch")
+				case "downloaded":
+					assert.Equal(t, "0", actualParam.Value, "downloaded value mismatch")
+				case "left":
+					assert.Equal(t, "7159086", actualParam.Value, "left value mismatch")
+				case "numwant":
+					assert.Equal(t, "80", actualParam.Value, "numwant value mismatch")
+				case "key":
+					assert.Len(t, actualParam.Value, 8, "key length mismatch")
+					for _, char := range actualParam.Value {
+						assert.True(t, (char >= '0' && char <= '9') || (char >= 'A' && char <= 'F'), "key contains invalid hex character '%c'", char)
+					}
+				case "compact":
+					assert.Equal(t, "1", actualParam.Value, "compact value mismatch")
+				case "supportcrypto":
+					assert.Equal(t, "1", actualParam.Value, "supportcrypto value mismatch")
+				case "event":
+					assert.Equal(t, "started", actualParam.Value, "event value mismatch")
+				}
+			}
+		})
+	}
+}
+
+// TestHttpRequestDirector_PerTorrentHandling tests the logic related to
+// generating, storing, reusing, and removing per-torrent data (peer_id, key).
+func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
+	rd := New()
+	infoHash := "%A9%BFz%B1%BB%05%91%9A%23J5%13Y%95%14%89f%08_9"
+	rawQuery := fmt.Sprintf(
+		"compact=1&downloaded=0&event=started&info_hash=%s&key=OLD_KEY&left=7159086&peer_id=OLD_PEER_ID&port=3456&supportcrypto=1&uploaded=0",
+		infoHash)
+	dummyURL := "http://example.com/tracker/announce?" + rawQuery
+	infoHashUnescaped, err := url.QueryUnescape(infoHash)
+	require.NoError(t, err)
+
+	// --- Initial call (event=started) ---
+	req1, err := http.NewRequest("GET", dummyURL, nil)
+	require.NoError(t, err)
+	err = rd.HttpRequestDirector(req1)
+	require.NoError(t, err)
+
+	q1 := req1.URL.Query()
+	generatedPeerID := q1.Get("peer_id")
+	require.NotEmpty(t, generatedPeerID)
+	generatedKey := q1.Get("key")
+	require.NotEmpty(t, generatedKey)
+
+	// Check stored data after first call
+	storedData, ok := rd.torrents.Load(infoHashUnescaped)
+	require.True(t, ok, "PerTorrent data not found in map after first call")
+	pt, ok := storedData.(*perTorrent)
+	require.True(t, ok, "Stored data is not of type *perTorrent")
+	assert.Equal(t, generatedPeerID, pt.peerID, "Stored peerID does not match generated peerID")
+	assert.Equal(t, generatedKey, pt.key, "Stored key does not match generated key")
+
+	// --- Subsequent call (event=started or no event) - should reuse ---
+	// Use a query without event=started to ensure reuse happens even without the explicit event
+	rawQueryNoEvent := fmt.Sprintf(
+		"compact=1&downloaded=10&info_hash=%s&key=OLD_KEY&left=7159076&peer_id=OLD_PEER_ID&port=3456&supportcrypto=1&uploaded=10",
+		infoHash)
+	dummyURLNoEvent := "http://example.com/tracker/announce?" + rawQueryNoEvent
+	req2, err := http.NewRequest("GET", dummyURLNoEvent, nil)
+	require.NoError(t, err)
+	err = rd.HttpRequestDirector(req2)
+	require.NoError(t, err)
+
+	q2 := req2.URL.Query()
+	assert.Equal(t, generatedPeerID, q2.Get("peer_id"), "peer_id should be reused on second call")
+	assert.Equal(t, generatedKey, q2.Get("key"), "key should be reused on second call")
+
+	// Verify data still exists and is unchanged
+	storedData2, ok := rd.torrents.Load(infoHashUnescaped)
+	require.True(t, ok, "PerTorrent data not found in map after second call")
+	pt2, ok := storedData2.(*perTorrent)
+	require.True(t, ok, "Stored data is not of type *perTorrent after second call")
+	assert.Equal(t, generatedPeerID, pt2.peerID, "Stored peerID should not change after second call")
+	assert.Equal(t, generatedKey, pt2.key, "Stored key should not change after second call")
+
+	// --- Call with 'stopped' event - should remove data ---
+	stoppedQuery := strings.Replace(rawQuery, "event=started", "event=stopped", 1)
+	stoppedURL := "http://example.com/tracker/announce?" + stoppedQuery
+	req3, err := http.NewRequest("GET", stoppedURL, nil)
+	require.NoError(t, err)
+	err = rd.HttpRequestDirector(req3)
+	require.NoError(t, err)
+
+	q3 := req3.URL.Query()
+	assert.Equal(t, generatedPeerID, q3.Get("peer_id"), "peer_id should be reused on remove call")
+	assert.Equal(t, generatedKey, q3.Get("key"), "key should be reused on remove call")
+
+	_, ok = rd.torrents.Load(infoHashUnescaped)
+	assert.False(t, ok, "PerTorrent data should be removed after 'stopped' event")
+
+	// --- Call after 'stopped' - should generate new data ---
+	req4, err := http.NewRequest("GET", dummyURL, nil) // event=started again
+	require.NoError(t, err)
+	err = rd.HttpRequestDirector(req4)
+	require.NoError(t, err)
+
+	q4 := req4.URL.Query()
+	newGeneratedPeerID := q4.Get("peer_id")
+	require.NotEmpty(t, generatedPeerID)
+	newGeneratedKey := q4.Get("key")
+	require.NotEmpty(t, generatedKey)
+
+	assert.NotEqual(t, generatedPeerID, newGeneratedPeerID, "New peer_id should be generated after stopped event")
+	assert.NotEqual(t, generatedKey, newGeneratedKey, "New key should be generated after stopped event")
+
+	// Check stored data after fourth call
+	storedData4, ok := rd.torrents.Load(infoHashUnescaped)
+	require.True(t, ok, "PerTorrent data not found in map after fourth call")
+	pt4, ok := storedData4.(*perTorrent)
+	require.True(t, ok, "Stored data is not of type *perTorrent after fourth call")
+	assert.Equal(t, newGeneratedPeerID, pt4.peerID, "Stored peerID does not match newly generated peerID")
+	assert.Equal(t, newGeneratedKey, pt4.key, "Stored key does not match newly generated key")
 }

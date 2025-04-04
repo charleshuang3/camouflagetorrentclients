@@ -43,6 +43,13 @@ func New() *requestDirector {
 }
 
 func (s *requestDirector) HttpRequestDirector(r *http.Request) error {
+	// Do nothing for scrape request. anacrolix/torrent does not call HttpRequestDirector right now.
+	// Just incase the behavior changed.
+	parts := strings.Split(r.URL.Path, "/")
+	if parts[len(parts)-1] == "scrape" {
+		return nil
+	}
+
 	err := s.modifyQuery(r)
 	if err != nil {
 		return err
