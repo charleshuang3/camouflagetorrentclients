@@ -21,7 +21,7 @@ import (
 const (
 	totalTrackers   = 2
 	testTimeout     = 15 * time.Second
-	testTorrentFile = "test-torrents/test.torrent"
+	testTorrentFile = "test-torrents/test-public.torrent"
 	port            = 3456
 )
 

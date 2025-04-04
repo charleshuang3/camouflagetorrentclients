@@ -133,10 +133,10 @@ func TestQueryParams_Str(t *testing.T) {
 	}
 }
 
-// TestTorrentFile verifies that a specific torrent file ("test-torrents/test.torrent")
+// TestTorrentFile verifies that a specific torrent file ("test-torrents/test-public.torrent")
 // conforms to expected specifications.
 func TestTorrentFile(t *testing.T) {
-	mi, err := metainfo.LoadFromFile("test-torrents/test.torrent")
+	mi, err := metainfo.LoadFromFile("test-torrents/test-public.torrent")
 	require.NoError(t, err)
 	assert.Len(t, mi.AnnounceList, 2)
 	assert.Equal(t, []string{"http://127.0.0.1:3456/tracker/announce"}, mi.AnnounceList[0])
