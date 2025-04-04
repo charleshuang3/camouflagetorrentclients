@@ -30,12 +30,21 @@ func TestAnnounceRequest(t *testing.T) {
 		torrentFile   string
 		infoHash      string
 		totalTrackers int
+		hasAuthQuery  bool
 	}{
 		{
 			name:          "test-public-torrent",
 			torrentFile:   "../test-torrents/test-public.torrent",
 			infoHash:      "%A9%BFz%B1%BB%05%91%9A%23J5%13Y%95%14%89f%08_9",
 			totalTrackers: 2,
+			hasAuthQuery:  false,
+		},
+		{
+			name:          "test-private-torrent",
+			torrentFile:   "../test-torrents/test-private.torrent",
+			infoHash:      "1%83%CA%D9%2B%93%5C%82%D2%0F%24%3A%88JDp%8B%3B%2B%22",
+			totalTrackers: 1,
+			hasAuthQuery:  true,
 		},
 	}
 
@@ -60,28 +69,42 @@ func TestAnnounceRequest(t *testing.T) {
 				assert.Equal(t, "close", r.Header.Get("Connection"))
 
 				// Query parameter checks:
+				beginIndex := 0
+				if tc.hasAuthQuery {
+					beginIndex = 1
+				}
+
 				q, err := commons.QueryParamsFromRawQueryStr(r.URL.RawQuery)
 				require.NoError(t, err)
-				assert.Len(t, q, 11)
+				if tc.hasAuthQuery {
+					assert.Len(t, q, 12)
+				} else {
+					assert.Len(t, q, 11)
+				}
 
 				infoHash, err := url.QueryUnescape(tc.infoHash)
 				require.NoError(t, err)
-				assert.Equal(t, q[0], &commons.QueryParam{Name: "info_hash", Value: infoHash})
 
-				assert.Equal(t, q[1].Name, "peer_id")
-				assert.Len(t, q[1].Value, 20)
-				assert.True(t, strings.HasPrefix(q[1].Value, transmissionV406Bep20))
+				if tc.hasAuthQuery {
+					assert.Equal(t, q[0], &commons.QueryParam{Name: "auth", Value: "123"})
+				}
 
-				assert.Equal(t, q[2], &commons.QueryParam{Name: "port", Value: strconv.Itoa(port)})
-				assert.Equal(t, q[3], &commons.QueryParam{Name: "uploaded", Value: "0"})
-				assert.Equal(t, q[4], &commons.QueryParam{Name: "downloaded", Value: "0"})
-				assert.Equal(t, q[5], &commons.QueryParam{Name: "left", Value: "7159086"})
-				assert.Equal(t, q[6], &commons.QueryParam{Name: "numwant", Value: "80"})
-				assert.Equal(t, q[7].Name, "key")
-				assert.Len(t, q[7].Value, 8)
-				assert.Equal(t, q[8], &commons.QueryParam{Name: "compact", Value: "1"})
-				assert.Equal(t, q[9], &commons.QueryParam{Name: "supportcrypto", Value: "1"})
-				assert.Equal(t, q[10], &commons.QueryParam{Name: "event", Value: "started"})
+				assert.Equal(t, q[beginIndex+0], &commons.QueryParam{Name: "info_hash", Value: infoHash})
+
+				assert.Equal(t, q[beginIndex+1].Name, "peer_id")
+				assert.Len(t, q[beginIndex+1].Value, 20)
+				assert.True(t, strings.HasPrefix(q[beginIndex+1].Value, transmissionV406Bep20))
+
+				assert.Equal(t, q[beginIndex+2], &commons.QueryParam{Name: "port", Value: strconv.Itoa(port)})
+				assert.Equal(t, q[beginIndex+3], &commons.QueryParam{Name: "uploaded", Value: "0"})
+				assert.Equal(t, q[beginIndex+4], &commons.QueryParam{Name: "downloaded", Value: "0"})
+				assert.Equal(t, q[beginIndex+5], &commons.QueryParam{Name: "left", Value: "7159086"})
+				assert.Equal(t, q[beginIndex+6], &commons.QueryParam{Name: "numwant", Value: "80"})
+				assert.Equal(t, q[beginIndex+7].Name, "key")
+				assert.Len(t, q[beginIndex+7].Value, 8)
+				assert.Equal(t, q[beginIndex+8], &commons.QueryParam{Name: "compact", Value: "1"})
+				assert.Equal(t, q[beginIndex+9], &commons.QueryParam{Name: "supportcrypto", Value: "1"})
+				assert.Equal(t, q[beginIndex+10], &commons.QueryParam{Name: "event", Value: "started"})
 
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("d8:intervali1800e5:peersld2:ip9:127.0.0.14:porti6881e6:peer id20:-TR3000-012345678901e")) // Example minimal tracker response

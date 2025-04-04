@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
+	"sync"
 
 	"github.com/anacrolix/log"
 	"github.com/charleshuang3/camouflagetorrentclients/commons"
@@ -31,12 +33,12 @@ type perTorrent struct {
 // https://github.com/transmission/transmission/blob/38c164933e9f77c110b48fe745861c3b98e3d83e/libtransmission/announcer-http.cc#L185
 type requestDirector struct {
 	// info_hash -> peer_id, key
-	torrents map[string]*perTorrent
+	torrents sync.Map
 }
 
 func New() *requestDirector {
 	return &requestDirector{
-		torrents: map[string]*perTorrent{},
+		torrents: sync.Map{},
 	}
 }
 
@@ -72,26 +74,17 @@ func (s *requestDirector) modifyQuery(r *http.Request) error {
 	}
 	event := q.Get("event")
 
-	pt, exists := s.torrents[infoHash]
+	got, exists := s.torrents.LoadOrStore(infoHash, createPerTorrent())
 	if event == commons.EventStarted {
 		// It is a bug if exists.
 		if exists {
 			logger.Levelf(log.Error, "start a torrent already started")
 		}
-		pt = createPerTorrent()
-		s.torrents[infoHash] = pt
 	} else if event == commons.EventStopped {
-		// If stopped, remove the torrent entry
-		delete(s.torrents, infoHash)
-		// If it didn't exist before stopping, we might not have peer_id/key,
-		// but the request might still be valid if the tracker doesn't require them on stop.
-		// For now, we proceed without setting them if pt is nil.
+		s.torrents.Delete(infoHash)
 	}
 
-	if pt == nil {
-		logger.Levelf(log.Error, "torrent not started")
-		return fmt.Errorf("missing per-torrent data for info_hash %s and event '%s'", infoHash, event)
-	}
+	pt := got.(*perTorrent)
 
 	q.Set("peer_id", pt.peerID)
 	q.Set("key", pt.key)
@@ -118,7 +111,15 @@ func (s *requestDirector) modifyQuery(r *http.Request) error {
 		return err
 	}
 
-	r.URL.RawQuery = params.Str()
+	// RawQuery may contains private tracker's query at the beginning.
+	// before "&compact"
+	index := strings.Index(r.URL.RawQuery, "&compact")
+	if index != -1 {
+		r.URL.RawQuery = r.URL.RawQuery[0:index] + "&" + params.Str()
+	} else {
+		r.URL.RawQuery = params.Str()
+	}
+
 	return nil
 }
 

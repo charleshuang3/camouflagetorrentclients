@@ -30,7 +30,7 @@ func TestTorrentFiles(t *testing.T) {
 			"test-private-torrent",
 			"test-private.torrent",
 			"3183cad92b935c82d20f243a884a44708b3b2b22",
-			[]string{"http://127.0.0.1:3456/tracker/announce?key=123"},
+			[]string{"http://127.0.0.1:3456/tracker/announce?auth=123"},
 			[]string{"1.txt", "dir/2.txt", "large.file.txt"},
 			true,
 		},
