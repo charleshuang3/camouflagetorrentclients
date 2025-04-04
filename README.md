@@ -19,6 +19,12 @@ The core logic intercepts outgoing tracker requests and replaces specific argume
 *   Support for mimicking other clients (e.g., qBittorrent, uTorrent).
 *   More sophisticated camouflage techniques.
 
+## Related codepath
+
+- [anacrolix/torrent/tracker/tracker.go](https://github.com/anacrolix/torrent/blob/3a656a26676c23ee845dcc5b810e1f7f06005b06/tracker/tracker.go#L59)
+- [anacrolix/torrent/tracker/http/http.go](https://github.com/anacrolix/torrent/blob/3a656a26676c23ee845dcc5b810e1f7f06005b06/tracker/http/http.go#L88)
+- [anacrolix/torrent/tracker_scraper.go](https://github.com/anacrolix/torrent/blob/3a656a26676c23ee845dcc5b810e1f7f06005b06/tracker_scraper.go#L127)
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests or open issues.
