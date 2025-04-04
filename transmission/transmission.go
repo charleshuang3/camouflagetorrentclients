@@ -1,4 +1,4 @@
-package camouflagetorrentclients
+package transmission
 
 import (
 	"crypto/rand"
@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/anacrolix/log"
+	"github.com/charleshuang3/camouflagetorrentclients/commons"
 )
 
 const (
@@ -14,7 +15,7 @@ const (
 )
 
 var (
-	transmissionLogger = log.NewLogger("transmission")
+	logger = log.NewLogger("transmission")
 )
 
 type perTorrent struct {
@@ -22,32 +23,32 @@ type perTorrent struct {
 	key    string
 }
 
-// Transmission builds the announce request query parameters in the same fixed order
-// and format as the Transmission BitTorrent client.
+// requestDirector builds the announce request query parameters in the same fixed order
+// and format as the requestDirector BitTorrent client.
 //
-// Transmission 4.0.6:
+// requestDirector 4.0.6:
 //
 // https://github.com/transmission/transmission/blob/38c164933e9f77c110b48fe745861c3b98e3d83e/libtransmission/announcer-http.cc#L185
-type Transmission struct {
+type requestDirector struct {
 	// info_hash -> peer_id, key
 	torrents map[string]*perTorrent
 }
 
-func NewTransmission() *Transmission {
-	return &Transmission{
+func New() *requestDirector {
+	return &requestDirector{
 		torrents: map[string]*perTorrent{},
 	}
 }
 
-func (s *Transmission) HttpRequestDirector(r *http.Request) error {
+func (s *requestDirector) HttpRequestDirector(r *http.Request) error {
 	err := s.modifyQuery(r)
 	if err != nil {
 		return err
 	}
-	return s.modifyHeaders(r)
+	return modifyHeaders(r)
 }
 
-func (s *Transmission) modifyQuery(r *http.Request) error {
+func (s *requestDirector) modifyQuery(r *http.Request) error {
 	q := r.URL.Query()
 
 	// transmission use fixed value for "numwant", "compact", "supportcrypto".
@@ -72,14 +73,14 @@ func (s *Transmission) modifyQuery(r *http.Request) error {
 	event := q.Get("event")
 
 	pt, exists := s.torrents[infoHash]
-	if event == EventStarted {
+	if event == commons.EventStarted {
 		// It is a bug if exists.
 		if exists {
-			transmissionLogger.Levelf(log.Error, "start a torrent already started")
+			logger.Levelf(log.Error, "start a torrent already started")
 		}
-		pt = s.createPerTorrent()
+		pt = createPerTorrent()
 		s.torrents[infoHash] = pt
-	} else if event == EventStopped {
+	} else if event == commons.EventStopped {
 		// If stopped, remove the torrent entry
 		delete(s.torrents, infoHash)
 		// If it didn't exist before stopping, we might not have peer_id/key,
@@ -88,40 +89,40 @@ func (s *Transmission) modifyQuery(r *http.Request) error {
 	}
 
 	if pt == nil {
-		transmissionLogger.Levelf(log.Error, "torrent not started")
+		logger.Levelf(log.Error, "torrent not started")
 		return fmt.Errorf("missing per-torrent data for info_hash %s and event '%s'", infoHash, event)
 	}
 
 	q.Set("peer_id", pt.peerID)
 	q.Set("key", pt.key)
 
-	queryDefs := []*queryDef{
-		mustHaveDef("info_hash"),
-		mustHaveDef("peer_id"),
-		mustHaveDef("port"),
-		mustHaveDef("uploaded"),
-		mustHaveDef("downloaded"),
-		mustHaveDef("left"),
-		mustHaveDef("numwant"),
-		mustHaveDef("key"),
-		mustHaveDef("compact"),
-		mustHaveDef("supportcrypto"),
-		optionalDef("requirecrypto"),
-		optionalDef("event"),
-		optionalDef("corrupt"),
-		optionalDef("trackerid"),
+	queryDefs := []*commons.QueryDef{
+		commons.MustHaveDef("info_hash"),
+		commons.MustHaveDef("peer_id"),
+		commons.MustHaveDef("port"),
+		commons.MustHaveDef("uploaded"),
+		commons.MustHaveDef("downloaded"),
+		commons.MustHaveDef("left"),
+		commons.MustHaveDef("numwant"),
+		commons.MustHaveDef("key"),
+		commons.MustHaveDef("compact"),
+		commons.MustHaveDef("supportcrypto"),
+		commons.OptionalDef("requirecrypto"),
+		commons.OptionalDef("event"),
+		commons.OptionalDef("corrupt"),
+		commons.OptionalDef("trackerid"),
 	}
 
-	params, err := processQuery(queryDefs, q)
+	params, err := commons.ProcessQuery(queryDefs, q)
 	if err != nil {
 		return err
 	}
 
-	r.URL.RawQuery = params.str()
+	r.URL.RawQuery = params.Str()
 	return nil
 }
 
-func (s *Transmission) modifyHeaders(r *http.Request) error {
+func modifyHeaders(r *http.Request) error {
 	// Clear existing headers
 	for k := range r.Header {
 		delete(r.Header, k)
@@ -135,7 +136,7 @@ func (s *Transmission) modifyHeaders(r *http.Request) error {
 	return nil
 }
 
-func (s *Transmission) createPerTorrent() *perTorrent {
+func createPerTorrent() *perTorrent {
 	// https://github.com/transmission/transmission/blob/ac5c9e082da257e102eb4ff18f2e433976a585d1/libtransmission/session.cc#L194
 	// peer_id should be "-TRxyzb-" + 12 random alphanumeric char. Per session.
 	// But anacrolix/torrent is per client.
