@@ -34,10 +34,19 @@ func TestAnnounceRequest(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Note: We might receive multiple requests here, potentially concurrently.
 		// Assertions should be thread-safe or carefully managed if state is involved.
-		// Basic query parameter checks:
+		// Basic checks:
 		assert.Equal(t, "GET", r.Method)
-		assert.Contains(t, r.URL.Path, "/announce")
+		assert.Equal(t, r.URL.Path, "/tracker/announce")
 
+		// Header checks:
+		assert.Len(t, r.Header, 4)
+		assert.Equal(t, "deflate, gzip, br, zstd", r.Header.Get("Accept-Encoding"))
+		assert.Equal(t, "Transmission/4.0.6", r.Header.Get("User-Agent"))
+		assert.Equal(t, "*/*", r.Header.Get("Accept"))
+		// [TODO]: transmission does not have this header.
+		assert.Equal(t, "close", r.Header.Get("Connection"))
+
+		// Query parameter checks:
 		q, err := queryParamsFromRawQueryStr(r.URL.RawQuery)
 		require.NoError(t, err)
 		assert.Len(t, q, 11)

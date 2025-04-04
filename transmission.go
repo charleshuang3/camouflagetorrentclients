@@ -40,6 +40,14 @@ func NewTransmission() *Transmission {
 }
 
 func (s *Transmission) HttpRequestDirector(r *http.Request) error {
+	err := s.modifyQuery(r)
+	if err != nil {
+		return err
+	}
+	return s.modifyHeaders(r)
+}
+
+func (s *Transmission) modifyQuery(r *http.Request) error {
 	q := r.URL.Query()
 
 	// transmission use fixed value for "numwant", "compact", "supportcrypto".
@@ -69,7 +77,7 @@ func (s *Transmission) HttpRequestDirector(r *http.Request) error {
 		if exists {
 			transmissionLogger.Levelf(log.Error, "start a torrent already started")
 		}
-		pt = createPerTorrent()
+		pt = s.createPerTorrent()
 		s.torrents[infoHash] = pt
 	} else if event == EventStopped {
 		// If stopped, remove the torrent entry
@@ -113,7 +121,21 @@ func (s *Transmission) HttpRequestDirector(r *http.Request) error {
 	return nil
 }
 
-func createPerTorrent() *perTorrent {
+func (s *Transmission) modifyHeaders(r *http.Request) error {
+	// Clear existing headers
+	for k := range r.Header {
+		delete(r.Header, k)
+	}
+
+	// Add new headers
+	r.Header.Set("Accept-Encoding", "deflate, gzip, br, zstd")
+	r.Header.Set("User-Agent", "Transmission/4.0.6")
+	r.Header.Set("Accept", "*/*")
+
+	return nil
+}
+
+func (s *Transmission) createPerTorrent() *perTorrent {
 	// https://github.com/transmission/transmission/blob/ac5c9e082da257e102eb4ff18f2e433976a585d1/libtransmission/session.cc#L194
 	// peer_id should be "-TRxyzb-" + 12 random alphanumeric char. Per session.
 	// But anacrolix/torrent is per client.
