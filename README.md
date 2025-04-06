@@ -2,6 +2,17 @@
 
 This project provides utilities to modify anacrolix/torrent client requests, making them appear as if they originate from a different torrent client software. This can be useful for bypassing certain tracker restrictions or for privacy reasons.
 
+## Usage
+
+```go
+cfg := torrent.NewDefaultClientConfig()
+
+tr := transmission.New()
+cfg.HttpRequestDirector = tr.HttpRequestDirector
+
+c, err := torrent.NewClient(cfg)
+```
+
 ## Purpose
 
 The primary goal is to "camouflage" the identity of the torrent client being used by altering the parameters sent in tracker announce requests.
