@@ -118,7 +118,7 @@ func TestAnnounceRequest(t *testing.T) {
 			cfg := torrent.NewDefaultClientConfig()
 			cfg.DataDir = tempDir // Use the temp directory
 			tr := New()
-			cfg.HttpRequestDirector = tr.HttpRequestDirector
+			cfg.HttpRequestDirector = tr.ChangeHttpRequest
 			cfg.TrackerDialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 				// Redirect all HTTP tracker requests to our test server
 				return (&net.Dialer{}).DialContext(ctx, network, ts.URL[len("http://"):])
@@ -198,7 +198,7 @@ func TestHttpRequestDirector_Scrape(t *testing.T) {
 	originalURL := req.URL.String()
 	originalHeader := req.Header.Clone()
 
-	err = rd.HttpRequestDirector(req)
+	err = rd.ChangeHttpRequest(req)
 	require.NoError(t, err)
 
 	// Assert that the request was not modified
@@ -253,7 +253,7 @@ func TestHttpRequestDirector_Announce(t *testing.T) {
 			req.Header.Set("User-Agent", "OldAgent/1.0")
 			req.Header.Set("X-Custom-Header", "ShouldBeRemoved")
 
-			err = rd.HttpRequestDirector(req)
+			err = rd.ChangeHttpRequest(req)
 			require.NoError(t, err)
 
 			// --- Header Assertions (same for all cases) ---
@@ -331,7 +331,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	// --- Initial call (event=started) ---
 	req1, err := http.NewRequest("GET", dummyURL, nil)
 	require.NoError(t, err)
-	err = tr.HttpRequestDirector(req1)
+	err = tr.ChangeHttpRequest(req1)
 	require.NoError(t, err)
 
 	q1 := req1.URL.Query()
@@ -360,7 +360,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	dummyURLNoEvent := announce + rawQueryNoEvent
 	req2, err := http.NewRequest("GET", dummyURLNoEvent, nil)
 	require.NoError(t, err)
-	err = tr.HttpRequestDirector(req2)
+	err = tr.ChangeHttpRequest(req2)
 	require.NoError(t, err)
 
 	q2 := req2.URL.Query()
@@ -383,7 +383,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	stoppedURL := announce + stoppedQuery
 	req3, err := http.NewRequest("GET", stoppedURL, nil)
 	require.NoError(t, err)
-	err = tr.HttpRequestDirector(req3)
+	err = tr.ChangeHttpRequest(req3)
 	require.NoError(t, err)
 
 	q3 := req3.URL.Query()
@@ -399,7 +399,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	// --- Call after 'stopped' - should generate new data ---
 	req4, err := http.NewRequest("GET", dummyURL, nil) // event=started again
 	require.NoError(t, err)
-	err = tr.HttpRequestDirector(req4)
+	err = tr.ChangeHttpRequest(req4)
 	require.NoError(t, err)
 
 	q4 := req4.URL.Query()
@@ -427,7 +427,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	dummyURLTracker2 := announce2 + rawQuery // Use the same query params (including event=started)
 	req5, err := http.NewRequest("GET", dummyURLTracker2, nil)
 	require.NoError(t, err)
-	err = tr.HttpRequestDirector(req5)
+	err = tr.ChangeHttpRequest(req5)
 	require.NoError(t, err)
 
 	q5 := req5.URL.Query()

@@ -7,8 +7,8 @@ This project provides utilities to modify anacrolix/torrent client requests, mak
 ```go
 cfg := torrent.NewDefaultClientConfig()
 
-tr := transmission.New()
-cfg.HttpRequestDirector = tr.HttpRequestDirector
+d := NewDirectors(transmission.New())
+cfg.HttpRequestDirector = d.ChangeHttpRequest
 
 c, err := torrent.NewClient(cfg)
 ```

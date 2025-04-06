@@ -49,7 +49,7 @@ func New() *mimickTransmission {
 	}
 }
 
-func (s *mimickTransmission) HttpRequestDirector(r *http.Request) error {
+func (s *mimickTransmission) ChangeHttpRequest(r *http.Request) error {
 	// Do nothing for scrape request. anacrolix/torrent does not call HttpRequestDirector right now.
 	// Just incase the behavior changed.
 	parts := strings.Split(r.URL.Path, "/")
