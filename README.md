@@ -31,4 +31,4 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 
 ## License
 
-This project is licensed under the terms of the [LICENSE.txt](LICENSE.txt) file.
+This project is licensed under [Apache 2.0](LICENSE.txt).
