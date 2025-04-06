@@ -318,7 +318,7 @@ func TestHttpRequestDirector_Announce(t *testing.T) {
 // TestHttpRequestDirector_PerTorrentHandling tests the logic related to
 // generating, storing, reusing, and removing per-torrent data (peer_id, key).
 func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
-	rd := New()
+	tr := New()
 	announce := "http://example.com/tracker/announce"
 	infoHash := "%A9%BFz%B1%BB%05%91%9A%23J5%13Y%95%14%89f%08_9"
 	rawQuery := fmt.Sprintf(
@@ -331,7 +331,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	// --- Initial call (event=started) ---
 	req1, err := http.NewRequest("GET", dummyURL, nil)
 	require.NoError(t, err)
-	err = rd.HttpRequestDirector(req1)
+	err = tr.HttpRequestDirector(req1)
 	require.NoError(t, err)
 
 	q1 := req1.URL.Query()
@@ -341,12 +341,16 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	require.NotEmpty(t, generatedKey)
 
 	// Check stored data after first call
-	storedData, ok := rd.torrents.Load(announce + "--" + infoHashUnescaped)
+	id1 := announce + "--" + infoHashUnescaped
+	storedData, ok := tr.torrents.Load(id1)
 	require.True(t, ok, "PerTorrent data not found in map after first call")
 	pt, ok := storedData.(*perTorrent)
 	require.True(t, ok, "Stored data is not of type *perTorrent")
 	assert.Equal(t, generatedPeerID, pt.peerID, "Stored peerID does not match generated peerID")
 	assert.Equal(t, generatedKey, pt.key, "Stored key does not match generated key")
+
+	_, task1Exists := tr.scheduler.Tasks()[id1]
+	assert.True(t, task1Exists, "scrape task scheduled")
 
 	// --- Subsequent call (event=started or no event) - should reuse ---
 	// Use a query without event=started to ensure reuse happens even without the explicit event
@@ -356,7 +360,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	dummyURLNoEvent := announce + rawQueryNoEvent
 	req2, err := http.NewRequest("GET", dummyURLNoEvent, nil)
 	require.NoError(t, err)
-	err = rd.HttpRequestDirector(req2)
+	err = tr.HttpRequestDirector(req2)
 	require.NoError(t, err)
 
 	q2 := req2.URL.Query()
@@ -364,32 +368,38 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	assert.Equal(t, generatedKey, q2.Get("key"), "key should be reused on second call")
 
 	// Verify data still exists and is unchanged
-	storedData2, ok := rd.torrents.Load(announce + "--" + infoHashUnescaped)
+	storedData2, ok := tr.torrents.Load(id1)
 	require.True(t, ok, "PerTorrent data not found in map after second call")
 	pt2, ok := storedData2.(*perTorrent)
 	require.True(t, ok, "Stored data is not of type *perTorrent after second call")
 	assert.Equal(t, generatedPeerID, pt2.peerID, "Stored peerID should not change after second call")
 	assert.Equal(t, generatedKey, pt2.key, "Stored key should not change after second call")
 
+	_, task1Exists = tr.scheduler.Tasks()[id1]
+	assert.True(t, task1Exists, "scrape task still scheduled")
+
 	// --- Call with 'stopped' event - should remove data ---
 	stoppedQuery := strings.Replace(rawQuery, "event=started", "event=stopped", 1)
 	stoppedURL := announce + stoppedQuery
 	req3, err := http.NewRequest("GET", stoppedURL, nil)
 	require.NoError(t, err)
-	err = rd.HttpRequestDirector(req3)
+	err = tr.HttpRequestDirector(req3)
 	require.NoError(t, err)
 
 	q3 := req3.URL.Query()
 	assert.Equal(t, generatedPeerID, q3.Get("peer_id"), "peer_id should be reused on remove call")
 	assert.Equal(t, generatedKey, q3.Get("key"), "key should be reused on remove call")
 
-	_, ok = rd.torrents.Load(announce + "--" + infoHashUnescaped)
+	_, ok = tr.torrents.Load(id1)
 	assert.False(t, ok, "PerTorrent data should be removed after 'stopped' event")
+
+	_, task1Exists = tr.scheduler.Tasks()[id1]
+	assert.False(t, task1Exists, "scrape task stopped")
 
 	// --- Call after 'stopped' - should generate new data ---
 	req4, err := http.NewRequest("GET", dummyURL, nil) // event=started again
 	require.NoError(t, err)
-	err = rd.HttpRequestDirector(req4)
+	err = tr.HttpRequestDirector(req4)
 	require.NoError(t, err)
 
 	q4 := req4.URL.Query()
@@ -402,10 +412,50 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	assert.NotEqual(t, generatedKey, newGeneratedKey, "New key should be generated after stopped event")
 
 	// Check stored data after fourth call
-	storedData4, ok := rd.torrents.Load(announce + "--" + infoHashUnescaped)
+	storedData4, ok := tr.torrents.Load(id1)
 	require.True(t, ok, "PerTorrent data not found in map after fourth call")
 	pt4, ok := storedData4.(*perTorrent)
 	require.True(t, ok, "Stored data is not of type *perTorrent after fourth call")
 	assert.Equal(t, newGeneratedPeerID, pt4.peerID, "Stored peerID does not match newly generated peerID")
 	assert.Equal(t, newGeneratedKey, pt4.key, "Stored key does not match newly generated key")
+
+	_, task1Exists = tr.scheduler.Tasks()[id1]
+	assert.True(t, task1Exists, "new scrape task scheduled")
+
+	// --- Call with different tracker, same infohash ---
+	announce2 := "http://another-tracker.com/announce"
+	dummyURLTracker2 := announce2 + rawQuery // Use the same query params (including event=started)
+	req5, err := http.NewRequest("GET", dummyURLTracker2, nil)
+	require.NoError(t, err)
+	err = tr.HttpRequestDirector(req5)
+	require.NoError(t, err)
+
+	q5 := req5.URL.Query()
+	tracker2PeerID := q5.Get("peer_id")
+	require.NotEmpty(t, tracker2PeerID)
+	tracker2Key := q5.Get("key")
+	require.NotEmpty(t, tracker2Key)
+
+	// Verify new peer_id and key are different from the ones for the first tracker
+	assert.NotEqual(t, newGeneratedPeerID, tracker2PeerID, "PeerID should be different for different tracker")
+	assert.NotEqual(t, newGeneratedKey, tracker2Key, "Key should be different for different tracker")
+
+	// Verify a new entry exists for the new tracker/infohash combo
+	id2 := announce2 + "--" + infoHashUnescaped
+	storedData5, ok := tr.torrents.Load(id2)
+	require.True(t, ok, "PerTorrent data not found in map for second tracker")
+	pt5, ok := storedData5.(*perTorrent)
+	require.True(t, ok, "Stored data is not of type *perTorrent for second tracker")
+	assert.Equal(t, tracker2PeerID, pt5.peerID, "Stored peerID does not match generated peerID for second tracker")
+	assert.Equal(t, tracker2Key, pt5.key, "Stored key does not match generated key for second tracker")
+
+	_, task2Exists := tr.scheduler.Tasks()[id2]
+	assert.True(t, task2Exists, "new scrape task scheduled")
+
+	// Verify the entry for the first tracker still exists (from req4)
+	_, ok = tr.torrents.Load(id1)
+	assert.True(t, ok, "PerTorrent data for the first tracker should still exist")
+
+	_, task1Exists = tr.scheduler.Tasks()[id1]
+	assert.True(t, task1Exists, "scrape task still scheduled")
 }
