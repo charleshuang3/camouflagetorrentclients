@@ -319,11 +319,12 @@ func TestHttpRequestDirector_Announce(t *testing.T) {
 // generating, storing, reusing, and removing per-torrent data (peer_id, key).
 func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	rd := New()
+	announce := "http://example.com/tracker/announce"
 	infoHash := "%A9%BFz%B1%BB%05%91%9A%23J5%13Y%95%14%89f%08_9"
 	rawQuery := fmt.Sprintf(
-		"compact=1&downloaded=0&event=started&info_hash=%s&key=OLD_KEY&left=7159086&peer_id=OLD_PEER_ID&port=3456&supportcrypto=1&uploaded=0",
+		"?compact=1&downloaded=0&event=started&info_hash=%s&key=OLD_KEY&left=7159086&peer_id=OLD_PEER_ID&port=3456&supportcrypto=1&uploaded=0",
 		infoHash)
-	dummyURL := "http://example.com/tracker/announce?" + rawQuery
+	dummyURL := announce + rawQuery
 	infoHashUnescaped, err := url.QueryUnescape(infoHash)
 	require.NoError(t, err)
 
@@ -340,7 +341,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	require.NotEmpty(t, generatedKey)
 
 	// Check stored data after first call
-	storedData, ok := rd.torrents.Load(infoHashUnescaped)
+	storedData, ok := rd.torrents.Load(announce + "--" + infoHashUnescaped)
 	require.True(t, ok, "PerTorrent data not found in map after first call")
 	pt, ok := storedData.(*perTorrent)
 	require.True(t, ok, "Stored data is not of type *perTorrent")
@@ -350,9 +351,9 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	// --- Subsequent call (event=started or no event) - should reuse ---
 	// Use a query without event=started to ensure reuse happens even without the explicit event
 	rawQueryNoEvent := fmt.Sprintf(
-		"compact=1&downloaded=10&info_hash=%s&key=OLD_KEY&left=7159076&peer_id=OLD_PEER_ID&port=3456&supportcrypto=1&uploaded=10",
+		"?compact=1&downloaded=10&info_hash=%s&key=OLD_KEY&left=7159076&peer_id=OLD_PEER_ID&port=3456&supportcrypto=1&uploaded=10",
 		infoHash)
-	dummyURLNoEvent := "http://example.com/tracker/announce?" + rawQueryNoEvent
+	dummyURLNoEvent := announce + rawQueryNoEvent
 	req2, err := http.NewRequest("GET", dummyURLNoEvent, nil)
 	require.NoError(t, err)
 	err = rd.HttpRequestDirector(req2)
@@ -363,7 +364,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	assert.Equal(t, generatedKey, q2.Get("key"), "key should be reused on second call")
 
 	// Verify data still exists and is unchanged
-	storedData2, ok := rd.torrents.Load(infoHashUnescaped)
+	storedData2, ok := rd.torrents.Load(announce + "--" + infoHashUnescaped)
 	require.True(t, ok, "PerTorrent data not found in map after second call")
 	pt2, ok := storedData2.(*perTorrent)
 	require.True(t, ok, "Stored data is not of type *perTorrent after second call")
@@ -372,7 +373,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 
 	// --- Call with 'stopped' event - should remove data ---
 	stoppedQuery := strings.Replace(rawQuery, "event=started", "event=stopped", 1)
-	stoppedURL := "http://example.com/tracker/announce?" + stoppedQuery
+	stoppedURL := announce + stoppedQuery
 	req3, err := http.NewRequest("GET", stoppedURL, nil)
 	require.NoError(t, err)
 	err = rd.HttpRequestDirector(req3)
@@ -382,7 +383,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	assert.Equal(t, generatedPeerID, q3.Get("peer_id"), "peer_id should be reused on remove call")
 	assert.Equal(t, generatedKey, q3.Get("key"), "key should be reused on remove call")
 
-	_, ok = rd.torrents.Load(infoHashUnescaped)
+	_, ok = rd.torrents.Load(announce + "--" + infoHashUnescaped)
 	assert.False(t, ok, "PerTorrent data should be removed after 'stopped' event")
 
 	// --- Call after 'stopped' - should generate new data ---
@@ -401,7 +402,7 @@ func TestHttpRequestDirector_PerTorrentHandling(t *testing.T) {
 	assert.NotEqual(t, generatedKey, newGeneratedKey, "New key should be generated after stopped event")
 
 	// Check stored data after fourth call
-	storedData4, ok := rd.torrents.Load(infoHashUnescaped)
+	storedData4, ok := rd.torrents.Load(announce + "--" + infoHashUnescaped)
 	require.True(t, ok, "PerTorrent data not found in map after fourth call")
 	pt4, ok := storedData4.(*perTorrent)
 	require.True(t, ok, "Stored data is not of type *perTorrent after fourth call")

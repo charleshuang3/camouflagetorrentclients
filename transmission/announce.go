@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
 	"github.com/anacrolix/log"
 	"github.com/charleshuang3/camouflagetorrentclients/commons"
+	"github.com/madflojo/tasks"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -25,24 +28,28 @@ type perTorrent struct {
 	key    string
 }
 
-// requestDirector builds the announce request query parameters in the same fixed order
-// and format as the requestDirector BitTorrent client.
+// mimickTransmission builds the announce request query parameters in the same fixed order
+// and format as the mimickTransmission BitTorrent client.
 //
-// requestDirector 4.0.6:
+// transmission 4.0.6:
 //
-// https://github.com/transmission/transmission/blob/38c164933e9f77c110b48fe745861c3b98e3d83e/libtransmission/announcer-http.cc#L185
-type requestDirector struct {
+// https://github.com/mimickTransmission/mimickTransmission/blob/38c164933e9f77c110b48fe745861c3b98e3d83e/libtransmission/announcer-http.cc#L185
+type mimickTransmission struct {
 	// info_hash -> peer_id, key
-	torrents sync.Map
+	torrents          sync.Map
+	scheduler         *tasks.Scheduler
+	scrapeRateLimiter *rate.Limiter
 }
 
-func New() *requestDirector {
-	return &requestDirector{
-		torrents: sync.Map{},
+func New() *mimickTransmission {
+	return &mimickTransmission{
+		torrents:          sync.Map{},
+		scheduler:         tasks.New(),
+		scrapeRateLimiter: rate.NewLimiter(rate.Limit(maxScrapesPerSecond), maxScrapesPerSecond),
 	}
 }
 
-func (s *requestDirector) HttpRequestDirector(r *http.Request) error {
+func (s *mimickTransmission) HttpRequestDirector(r *http.Request) error {
 	// Do nothing for scrape request. anacrolix/torrent does not call HttpRequestDirector right now.
 	// Just incase the behavior changed.
 	parts := strings.Split(r.URL.Path, "/")
@@ -57,8 +64,16 @@ func (s *requestDirector) HttpRequestDirector(r *http.Request) error {
 	return modifyHeaders(r)
 }
 
-func (s *requestDirector) modifyQuery(r *http.Request) error {
+func (s *mimickTransmission) modifyQuery(r *http.Request) error {
 	q := r.URL.Query()
+
+	// RawQuery may contains private tracker's query at the beginning.
+	// before "&compact"
+	index := strings.Index(r.URL.RawQuery, "&compact")
+	privateTrackerQuery := ""
+	if index != -1 {
+		privateTrackerQuery = r.URL.RawQuery[0:index]
+	}
 
 	// transmission use fixed value for "numwant", "compact", "supportcrypto".
 	// anacrolix/torrent does not provide "numwant", and assign fixed value for "compact", "supportcrypto".
@@ -81,16 +96,23 @@ func (s *requestDirector) modifyQuery(r *http.Request) error {
 	}
 	event := q.Get("event")
 
-	got, exists := s.torrents.LoadOrStore(infoHash, createPerTorrent())
+	id := perTrackerTorrentID(r.URL, infoHash)
+	got, exists := s.torrents.LoadOrStore(id, createPerTorrent())
 	if event == commons.EventStarted {
 		// It is a bug if exists.
 		if exists {
 			logger.Levelf(log.Error, "start a torrent already started")
 		}
 	} else if event == commons.EventStopped {
-		s.torrents.Delete(infoHash)
+		s.torrents.Delete(id)
+		s.scheduler.Del(id)
 	}
 	// Announce not following a started event is possible, when seeding a finished torrent.
+
+	// schedule scrape requests.
+	if !exists {
+		s.scheduleScrape(id, newScrapeTask(s, r.URL, infoHash, privateTrackerQuery))
+	}
 
 	pt := got.(*perTorrent)
 
@@ -119,11 +141,8 @@ func (s *requestDirector) modifyQuery(r *http.Request) error {
 		return err
 	}
 
-	// RawQuery may contains private tracker's query at the beginning.
-	// before "&compact"
-	index := strings.Index(r.URL.RawQuery, "&compact")
-	if index != -1 {
-		r.URL.RawQuery = r.URL.RawQuery[0:index] + "&" + params.Str()
+	if privateTrackerQuery != "" {
+		r.URL.RawQuery = privateTrackerQuery + "&" + params.Str()
 	} else {
 		r.URL.RawQuery = params.Str()
 	}
@@ -178,4 +197,14 @@ func createPerTorrent() *perTorrent {
 		peerID: transmissionV406Bep20 + string(peerID),
 		key:    key,
 	}
+}
+
+func announceURL(u *url.URL) string {
+	urlCopy := *u
+	urlCopy.RawQuery = ""
+	return urlCopy.String()
+}
+
+func perTrackerTorrentID(u *url.URL, infoHash string) string {
+	return announceURL(u) + "--" + infoHash
 }
