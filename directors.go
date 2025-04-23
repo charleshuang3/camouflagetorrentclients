@@ -1,6 +1,10 @@
 package camouflagetorrentclients
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/anacrolix/log"
+)
 
 // HttpRequestDirector defines an interface for modifying HTTP requests.
 type HttpRequestDirector interface {
@@ -28,5 +32,14 @@ func (d *Directors) ChangeHttpRequest(req *http.Request) error {
 			return err
 		}
 	}
+	return nil
+}
+
+var logger = log.NewLogger("announce")
+
+type AnnounceLog struct{}
+
+func (a *AnnounceLog) ChangeHttpRequest(req *http.Request) error {
+	logger.Levelf(log.Info, "[%s] %s", req.Method, req.URL.String())
 	return nil
 }
