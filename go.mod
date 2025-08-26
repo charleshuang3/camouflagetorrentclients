@@ -6,7 +6,7 @@ require (
 	github.com/anacrolix/log v0.16.0
 	github.com/anacrolix/torrent v1.58.1
 	github.com/madflojo/tasks v1.2.1
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.0
 	golang.org/x/time v0.12.0
 )
 
